@@ -4,32 +4,36 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"xinjing/internal/config"
 	"xinjing/internal/handler"
 	"xinjing/internal/middleware"
 )
 
 func main() {
+	// 加载配置
+	cfg := config.Load()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck)
-	
-	// 组装中间件链
+
+	// 将中间件按顺序链式组合
 	finalHandler := middleware.Chain(
 		mux,
-		middleware.Recovery(), // 最外层兜底
-		middleware.Trace(),    // 生成/提取 Trace ID 并注入 Context
-		middleware.Logger(),   // 日志记录（此时 Context 中已有 Trace ID）
-		middleware.CORS(),     // 处理跨域
+		middleware.Recovery(),
+		middleware.Trace(),
+		middleware.Logger(),
+		middleware.CORS(),
 	)
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":" + cfg.ServerPort,
 		Handler:      finalHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Println("[心境] Server is running on :8080")
+	log.Printf("[心境] Server is running on :%s (env: %s)", cfg.ServerPort, cfg.AppEnv)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("[心境] Failed to start server: %v", err)
 	}
