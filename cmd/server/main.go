@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
 	"xinjing/internal/config"
@@ -44,9 +46,30 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Info("server starting", "port", cfg.ServerPort, "env", cfg.AppEnv)
-	if err := server.ListenAndServe(); err != nil {
-		log.Error("server failed to start", "error", err)
-		os.Exit(1)
+	// 3. 监听操作系统中断信号（Ctrl+C）。
+	//    signal.NotifyContext 返回一个 context，信号到达时自动取消。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// 4. 在后台 goroutine 启动服务器，不阻塞主函数。
+	go func() {
+		log.Info("server starting", "port", cfg.ServerPort, "env", cfg.AppEnv)
+		// 正常关闭时 ListenAndServe 返回 http.ErrServerClosed，这不是错误。
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 5. 阻塞等待中断信号。
+	<-ctx.Done()
+	log.Info("shutting down...")
+
+	// 6. 给服务器 10 秒完成现有请求，超时则强制关闭。
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Error("shutdown error", "error", err)
 	}
+	log.Info("server stopped")
 }

@@ -5,6 +5,7 @@ import (
 	"runtime/debug"
 
 	"xinjing/internal/logging"
+	"xinjing/internal/response"
 )
 
 // Recovery 捕获 handler 中的 panic，防止整个服务崩溃。
@@ -17,7 +18,7 @@ func Recovery() Middleware {
 						"panic", err,
 						"stack", string(debug.Stack()),
 					)
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					response.Error(w, http.StatusInternalServerError, "Internal Server Error")
 				}
 			}()
 
