@@ -11,6 +11,8 @@ import (
 	"xinjing/internal/handler"
 	"xinjing/internal/logging"
 	"xinjing/internal/middleware"
+	"xinjing/internal/persistence"
+	"xinjing/internal/persistence/migrate"
 )
 
 func main() {
@@ -25,8 +27,28 @@ func main() {
 
 	log := logging.For("server")
 
+	// 3. 打开数据库并配置连接池
+	db, err := persistence.Open(cfg)
+	if err != nil {
+		log.Error("open database failed", "error", err)
+		os.Exit(1)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Error("get sql.DB failed", "error", err)
+		os.Exit(1)
+	}
+
+	// 4. 启动时自动执行数据库迁移（多实例安全）
+	if cfg.DBAutoMigrate {
+		if err := migrate.Run(context.Background(), sqlDB, cfg.DBDriver); err != nil {
+			log.Error("migrate failed", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ping", handler.HealthCheck)
+	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
 
 	// Trace 作为请求身份边界，需位于访问日志外层，为请求注入 trace_id；
 	// AccessLog 通过 logging.FromContext 读取，二者不再有代码级依赖。
@@ -46,12 +68,11 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// 3. 监听操作系统中断信号（Ctrl+C）。
-	//    signal.NotifyContext 返回一个 context，信号到达时自动取消。
+	// 5. 监听操作系统中断信号（Ctrl+C）。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// 4. 在后台 goroutine 启动服务器，不阻塞主函数。
+	// 6. 在后台 goroutine 启动服务器，不阻塞主函数。
 	go func() {
 		log.Info("server starting", "port", cfg.ServerPort, "env", cfg.AppEnv)
 		// 正常关闭时 ListenAndServe 返回 http.ErrServerClosed，这不是错误。
@@ -61,11 +82,11 @@ func main() {
 		}
 	}()
 
-	// 5. 阻塞等待中断信号。
+	// 7. 阻塞等待中断信号。
 	<-ctx.Done()
 	log.Info("shutting down...")
 
-	// 6. 给服务器 10 秒完成现有请求，超时则强制关闭。
+	// 8. 给服务器 10 秒完成现有请求，超时则强制关闭。
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
