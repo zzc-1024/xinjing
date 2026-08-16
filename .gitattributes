@@ -1,2 +1,4 @@
-# Go 源码统一使用 LF 换行（gofmt 标准），避免 Windows CRLF 造成格式误报
+# Force LF line endings for Go sources (gofmt standard).
+# The eol=lf rule only rewrites files on checkout; it does NOT rewrite
+# files already committed with CRLF in this repo.
 *.go text eol=lf
