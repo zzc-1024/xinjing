@@ -1,10 +1,11 @@
 package config
 
 import (
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
+
+	"xinjing/internal/logging"
 )
 
 // Config 集中管理所有应用配置
@@ -12,6 +13,7 @@ type Config struct {
 	ServerPort string // HTTP 监听端口
 	AppEnv     string // 运行环境: development / production
 	LogLevel   string // 日志级别: debug / info / warn / error
+	LogFormat  string // 日志格式: text / json
 }
 
 // Load 从 .env 文件和环境变量中加载配置
@@ -19,17 +21,22 @@ type Config struct {
 func Load() *Config {
 	// 尝试加载 .env 文件，文件不存在时不报错（生产环境通常通过容器注入环境变量）
 	if err := godotenv.Load(); err != nil {
-		log.Println("[心境] No .env file found, using system environment variables")
+		logging.For("config").Debug("no .env file found, using system environment variables", "error", err)
 	}
 
 	cfg := &Config{
 		ServerPort: getEnv("XINJING_SERVER_PORT", "8080"),
 		AppEnv:     getEnv("XINJING_APP_ENV", "development"),
 		LogLevel:   getEnv("XINJING_LOG_LEVEL", "info"),
+		LogFormat:  getEnv("XINJING_LOG_FORMAT", "text"),
 	}
 
-	log.Printf("[心境] Config loaded: env=%s port=%s log_level=%s",
-		cfg.AppEnv, cfg.ServerPort, cfg.LogLevel)
+	logging.For("config").Info("config loaded",
+		"env", cfg.AppEnv,
+		"port", cfg.ServerPort,
+		"log_level", cfg.LogLevel,
+		"log_format", cfg.LogFormat,
+	)
 
 	return cfg
 }
