@@ -1,0 +1,44 @@
+# GitHub Actions 持续集成流水线：
+# 每次向 main 分支 push 或发起 Pull Request 时自动执行格式检查、编译、静态检查、单元测试。
+# 运行在 GitHub 的云端 Ubuntu 虚拟机上，与本机环境无关。
+
+name: CI
+
+# 触发时机：push 到 main、或对 main 发起 PR
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# jobs 定义要执行的「任务」
+jobs:
+  build:
+    # 每次运行都是一台全新的 Ubuntu 虚拟机
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 拉取本仓库代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 Go 工具链，版本自动读取 go.mod 里的声明（go 1.26.5）
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # 3. 检查代码格式：gofmt -l 列出不合规文件，非空则本步骤失败
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      # 4. 编译（复用 Makefile 里的命令，保证本机与 CI 行为一致）
+      - name: Build
+        run: make build
+
+      # 5. 静态检查
+      - name: Vet
+        run: make vet
+
+      # 6. 单元测试
+      - name: Test
+        run: make test

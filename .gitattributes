@@ -1,0 +1,2 @@
+# Go 源码统一使用 LF 换行（gofmt 标准），避免 Windows CRLF 造成格式误报
+*.go text eol=lf
