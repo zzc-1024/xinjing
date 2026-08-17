@@ -21,6 +21,15 @@ type Config struct {
 	DBMaxOpen     int    // 连接池最大连接数
 	DBMaxIdle     int    // 连接池最大空闲连接数
 	DBAutoMigrate bool   // 启动时是否自动执行数据库迁移
+
+	StorageBackend        string // 对象存储后端: local(开发) / s3(生产，指向 RustFS 等 S3 兼容服务)
+	StorageLocalDir       string // local 后端的存储根目录
+	StorageS3Endpoint     string // S3 端点（RustFS 地址，如 http://127.0.0.1:9000）
+	StorageS3Region       string // S3 区域（RustFS 一般填 us-east-1 即可）
+	StorageS3Bucket       string // S3 桶名
+	StorageS3AccessKey    string // S3 访问密钥
+	StorageS3SecretKey    string // S3 秘密密钥
+	StorageS3UsePathStyle bool   // 是否使用 path-style 寻址（RustFS 需要 true）
 }
 
 // Load 从 .env 文件和环境变量中加载配置
@@ -41,6 +50,15 @@ func Load() *Config {
 		DBMaxOpen:     getEnvInt("XINJING_DB_MAX_OPEN", 10),
 		DBMaxIdle:     getEnvInt("XINJING_DB_MAX_IDLE", 5),
 		DBAutoMigrate: getEnvBool("XINJING_DB_AUTO_MIGRATE", true),
+
+		StorageBackend:        getEnv("XINJING_STORAGE_BACKEND", "local"),
+		StorageLocalDir:       getEnv("XINJING_STORAGE_LOCAL_DIR", "./storage"),
+		StorageS3Endpoint:     getEnv("XINJING_STORAGE_S3_ENDPOINT", ""),
+		StorageS3Region:       getEnv("XINJING_STORAGE_S3_REGION", "us-east-1"),
+		StorageS3Bucket:       getEnv("XINJING_STORAGE_S3_BUCKET", ""),
+		StorageS3AccessKey:    getEnv("XINJING_STORAGE_S3_ACCESS_KEY", ""),
+		StorageS3SecretKey:    getEnv("XINJING_STORAGE_S3_SECRET_KEY", ""),
+		StorageS3UsePathStyle: getEnvBool("XINJING_STORAGE_S3_USE_PATH_STYLE", true),
 	}
 
 	logging.For("config").Info("config loaded",
