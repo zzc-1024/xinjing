@@ -26,7 +26,7 @@ func openTestDB(t *testing.T) *gorm.DB {
 	// 用 GORM AutoMigrate 建表（表结构与迁移 SQL 对齐；迁移本身由 migrate 包测试覆盖）
 	if err := db.AutoMigrate(
 		&models.User{},
-		&models.APIKey{},
+		&models.RefreshToken{},
 		&models.Function{},
 		&models.FunctionVersion{},
 		&models.Route{},
@@ -97,46 +97,6 @@ func TestUserRepository(t *testing.T) {
 	}
 	if _, err := repo.GetByID(ctx, u.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetByID after delete err = %v, want ErrNotFound", err)
-	}
-}
-
-func TestAPIKeyRepository(t *testing.T) {
-	db := openTestDB(t)
-	repo := NewAPIKeyRepository(db)
-	ctx := context.Background()
-
-	key := &models.APIKey{
-		UserID:  "user-1",
-		KeyHash: "hashed-abc",
-		Name:    "default",
-		Scopes:  []string{"read", "write"},
-		Status:  "active",
-	}
-	if err := repo.Create(ctx, key); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// GetByKeyHash
-	got, err := repo.GetByKeyHash(ctx, "hashed-abc")
-	if err != nil {
-		t.Fatalf("GetByKeyHash: %v", err)
-	}
-	if got.UserID != "user-1" {
-		t.Fatalf("user_id = %q, want user-1", got.UserID)
-	}
-
-	// ListByUserID
-	list, err := repo.ListByUserID(ctx, "user-1")
-	if err != nil {
-		t.Fatalf("ListByUserID: %v", err)
-	}
-	if len(list) != 1 {
-		t.Fatalf("ListByUserID len = %d, want 1", len(list))
-	}
-
-	// 不存在应 ErrNotFound
-	if _, err := repo.GetByKeyHash(ctx, "nope"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetByKeyHash(missing) err = %v, want ErrNotFound", err)
 	}
 }
 

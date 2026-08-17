@@ -32,7 +32,7 @@ func RegisterIDCallbacks(db *gorm.DB) error {
 		if tx.Statement.Schema == nil {
 			return
 		}
-		// 拿到当前正在插入的模型值（*User、*APIKey 等）
+		// 拿到当前正在插入的模型值（*User、*RefreshToken 等）
 		rv := reflect.ValueOf(tx.Statement.Dest)
 		if rv.Kind() == reflect.Ptr {
 			rv = rv.Elem()

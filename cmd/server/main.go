@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	"xinjing/internal/auth"
 	"xinjing/internal/config"
 	"xinjing/internal/handler"
 	"xinjing/internal/logging"
 	"xinjing/internal/middleware"
 	"xinjing/internal/persistence"
 	"xinjing/internal/persistence/migrate"
+	"xinjing/internal/persistence/repo"
 )
 
 func main() {
@@ -47,8 +50,36 @@ func main() {
 		}
 	}
 
+	// 5. 初始化 JWT 管理器（RSA 非对称签名）。
+	// 签发节点需要私钥；验证节点需要公钥。二者可只配其一只用对应能力。
+	jwtManager, err := newJWTManager(cfg)
+	if err != nil {
+		log.Error("init jwt manager failed", "error", err)
+		os.Exit(1)
+	}
+
+	// 6. 初始化仓储与令牌处理器
+	userRepo := repo.NewUserRepository(db)
+	refreshRepo := repo.NewRefreshTokenRepository(db)
+
+	accessTTL, err := time.ParseDuration(cfg.AccessTTL)
+	if err != nil {
+		log.Error("parse access TTL failed", "error", err)
+		os.Exit(1)
+	}
+	refreshTTL, err := time.ParseDuration(cfg.RefreshTTL)
+	if err != nil {
+		log.Error("parse refresh TTL failed", "error", err)
+		os.Exit(1)
+	}
+
+	tokenHandler := handler.NewTokenHandler(userRepo, refreshRepo, jwtManager, accessTTL, refreshTTL)
+
+	// 7. 路由注册
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
+	mux.HandleFunc("POST /token", tokenHandler.HandleToken)
+	mux.HandleFunc("POST /refresh", tokenHandler.HandleRefresh)
 
 	// Trace 作为请求身份边界，需位于访问日志外层，为请求注入 trace_id；
 	// AccessLog 通过 logging.FromContext 读取，二者不再有代码级依赖。
@@ -68,11 +99,11 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// 5. 监听操作系统中断信号（Ctrl+C）。
+	// 8. 监听操作系统中断信号（Ctrl+C）。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// 6. 在后台 goroutine 启动服务器，不阻塞主函数。
+	// 9. 在后台 goroutine 启动服务器，不阻塞主函数。
 	go func() {
 		log.Info("server starting", "port", cfg.ServerPort, "env", cfg.AppEnv)
 		// 正常关闭时 ListenAndServe 返回 http.ErrServerClosed，这不是错误。
@@ -82,15 +113,45 @@ func main() {
 		}
 	}()
 
-	// 7. 阻塞等待中断信号。
+	// 10. 阻塞等待中断信号。
 	<-ctx.Done()
 	log.Info("shutting down...")
 
-	// 8. 给服务器 10 秒完成现有请求，超时则强制关闭。
+	// 11. 给服务器 10 秒完成现有请求，超时则强制关闭。
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Error("shutdown error", "error", err)
 	}
 	log.Info("server stopped")
+}
+
+// newJWTManager 根据配置加载 RSA 密钥并构建 JWTManager。
+// 私钥/公钥文件路径为空时对应能力缺失（Issue 或 Verify 返回 ErrMissingKey）。
+// 签发节点配私钥，验证节点配公钥，二者可独立配置。
+func newJWTManager(cfg *config.Config) (*auth.JWTManager, error) {
+	var priv *rsa.PrivateKey
+	var pub *rsa.PublicKey
+
+	if cfg.JWTPrivateKeyPath != "" {
+		pemData, err := os.ReadFile(cfg.JWTPrivateKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		if priv, err = auth.ParseRSAPrivateKeyPEM(pemData); err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.JWTPublicKeyPath != "" {
+		pemData, err := os.ReadFile(cfg.JWTPublicKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		if pub, err = auth.ParseRSAPublicKeyPEM(pemData); err != nil {
+			return nil, err
+		}
+	}
+
+	return auth.NewJWTManager(priv, pub), nil
 }

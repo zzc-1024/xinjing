@@ -32,6 +32,11 @@ type Config struct {
 	StorageS3UsePathStyle bool   // 是否使用 path-style 寻址（RustFS 需要 true）
 
 	CacheBackend string // 缓存后端: memory(默认，单机)；valkey 留待阶段 2
+
+	JWTPrivateKeyPath string // JWT 签名私钥文件路径（PEM，签发节点需要）
+	JWTPublicKeyPath  string // JWT 验签公钥文件路径（PEM，验证节点需要）
+	AccessTTL         string // access token（JWT）有效期字符串，如 "15m"
+	RefreshTTL        string // refresh token 有效期字符串，如 "720h"（30 天）
 }
 
 // Load 从 .env 文件和环境变量中加载配置
@@ -63,6 +68,11 @@ func Load() *Config {
 		StorageS3UsePathStyle: getEnvBool("XINJING_STORAGE_S3_USE_PATH_STYLE", true),
 
 		CacheBackend: getEnv("XINJING_CACHE_BACKEND", "memory"),
+
+		JWTPrivateKeyPath: getEnv("XINJING_JWT_PRIVATE_KEY", ""),
+		JWTPublicKeyPath:  getEnv("XINJING_JWT_PUBLIC_KEY", ""),
+		AccessTTL:         getEnv("XINJING_ACCESS_TTL", "15m"),
+		RefreshTTL:        getEnv("XINJING_REFRESH_TTL", "720h"),
 	}
 
 	logging.For("config").Info("config loaded",

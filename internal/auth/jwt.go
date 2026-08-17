@@ -27,8 +27,8 @@ var (
 // 非对称方案里：私钥只留在签发节点（能签不能给），公钥可放心分发给所有
 // 验证节点与第三方（只能验证、无法伪造）。这正契合分布式、可对外的服务形态。
 type JWTManager struct {
-	privateKey *rsa.PrivateKey // 签发用私钥；纯验证节点可传 nil
-	publicKey  *rsa.PublicKey  // 验证用公钥；纯签发节点可传 nil
+	privateKey *rsa.PrivateKey  // 签发用私钥；纯验证节点可传 nil
+	publicKey  *rsa.PublicKey   // 验证用公钥；纯签发节点可传 nil
 	now        func() time.Time // 可注入的时钟，测试时替换以模拟时间流逝
 }
 

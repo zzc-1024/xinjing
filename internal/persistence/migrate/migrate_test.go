@@ -41,7 +41,7 @@ func TestRunSQLite(t *testing.T) {
 	}
 
 	// 关键表都应已创建
-	for _, table := range []string{"users", "api_keys", "functions", "function_versions", "routes", "rate_limit_policies", "plugins", "plugin_instances", "invocation_logs"} {
+	for _, table := range []string{"users", "functions", "function_versions", "routes", "rate_limit_policies", "plugins", "plugin_instances", "invocation_logs", "refresh_tokens"} {
 		var n int
 		if err := db.QueryRow(
 			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {

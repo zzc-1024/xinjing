@@ -6,18 +6,17 @@ import "context"
 type AuthMethod string
 
 const (
-	// AuthMethodAPIKey 表示通过 API Key 认证。
-	AuthMethodAPIKey AuthMethod = "apikey"
-	// AuthMethodJWT 表示通过 JWT 认证。
+	// AuthMethodJWT 表示通过短期 JWT 认证（所有 API 请求都走这条）。
 	AuthMethodJWT AuthMethod = "jwt"
+	// AuthMethodRefreshToken 表示通过 refresh token 认证（发生在 /refresh 兑换环节）。
+	AuthMethodRefreshToken AuthMethod = "refresh_token"
 )
 
 // Principal 描述认证成功后「谁在访问」的主体信息。
 // 认证中间件校验通过后把它注入请求上下文，后续 handler 按需读取做授权与审计。
 type Principal struct {
 	UserID     string     // 用户 ID（UUIDv7 字符串）
-	AuthMethod AuthMethod // 认证方式：apikey / jwt
-	KeyID      string     // API Key 方式下为密钥记录 ID；JWT 方式下为空
+	AuthMethod AuthMethod // 认证方式：jwt / refresh_token
 	Scopes     []string   // 该凭证拥有的权限范围（原始字符串切片）
 }
 

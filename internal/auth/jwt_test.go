@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -63,7 +64,16 @@ func TestJWTExpired(t *testing.T) {
 func TestJWTTampered(t *testing.T) {
 	m := NewJWTManager(testRSAKey, &testRSAKey.PublicKey)
 	token, _ := m.Issue(context.Background(), "user-1", nil, time.Hour)
-	tampered := token[:len(token)-1] + "x"
+	// 篡改 payload 段（中间那段），而不是签名段末字符：
+	// 签名段末字符可能是 base64url 的填充/冗余字节，篡改后仍可能解码成合法签名，
+	// 导致校验「偶然通过」（这是原测试的偶发缺陷）。改动 payload 必然改变内容 → 签名必不匹配。
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("JWT 应为三段，got %d", len(parts))
+	}
+	// 在 payload 末尾追加一个字符（会改变解码内容，但保持 base64url 仍是合法字符集）
+	parts[1] += "A"
+	tampered := strings.Join(parts, ".")
 	if _, err := m.Verify(context.Background(), tampered); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("err = %v, want ErrInvalidToken", err)
 	}
