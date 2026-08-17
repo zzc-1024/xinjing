@@ -18,11 +18,12 @@
 - [ ] **JWT 精确撤销（可选）**
   - jti 字段已在 Principal/JWT 预留，但未实现「按 jti 作废单张 JWT」；当前靠 15 分钟短 TTL 兜底
 
-## 网关与限流（A 主线，可先略过）
+## 网关与限流（A 主线）
 
-- [ ] **子路由添加中间件能力**
-  - 给 SubRouter 增加「添加中间件」的能力（当前 Sub/Include 只加前缀与默认约束，不能加自定义中间件）
-  - 需验证/保证：中间件不会被重复添加（例如路由被 Include 嵌套时，认证/限流等中间件只包一次，不随嵌套层数重复叠加）
+- [x] **子路由添加中间件能力**（已完成）
+  - 已实现：Route/Sub/Include 均支持自定义中间件（NamedMiddleware）
+  - 中间件身份 = Provider + Name（官方 xinjing），冲突策略：默认报错、可配 keep-first/keep-last
+  - 已验证：中间件不随 Include 嵌套重复添加（按 Provider+Name 去重）
 
 ## 插件系统（B 主线，原阶段 3/4）
 
