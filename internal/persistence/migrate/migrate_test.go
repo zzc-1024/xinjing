@@ -30,14 +30,14 @@ func TestRunSQLite(t *testing.T) {
 		t.Fatalf("users table not found: %v", err)
 	}
 
-	// goose 版本表应有 6 条实际迁移记录（version_id=0 是 goose 自动写入的基准哨兵行）
-	// 对应 00001~00006 共 6 个迁移文件。
+	// goose 版本表应有 7 条实际迁移记录（version_id=0 是 goose 自动写入的基准哨兵行）
+	// 对应 00001~00007 共 7 个迁移文件。
 	var versions int
 	if err := db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`).Scan(&versions); err != nil {
 		t.Fatalf("query goose_db_version: %v", err)
 	}
-	if versions != 6 {
-		t.Fatalf("goose_db_version count = %d, want 6", versions)
+	if versions != 7 {
+		t.Fatalf("goose_db_version count = %d, want 7", versions)
 	}
 
 	// 关键表都应已创建
@@ -50,6 +50,16 @@ func TestRunSQLite(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("table %s not created", table)
 		}
+	}
+
+	// users 表应包含迁移 00007 新增的 password_hash 列
+	var colCount int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM pragma_table_info('users') WHERE name = 'password_hash'`).Scan(&colCount); err != nil {
+		t.Fatalf("query password_hash column: %v", err)
+	}
+	if colCount != 1 {
+		t.Fatalf("users.password_hash column not found")
 	}
 
 	// 迁移锁应已释放
