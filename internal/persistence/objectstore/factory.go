@@ -22,7 +22,7 @@ func New(cfg *config.Config) (ObjectStore, error) {
 			UsePathStyle: cfg.StorageS3UsePathStyle,
 		})
 	default:
-		return nil, fmt.Errorf("unsupported storage backend %q (支持: local / s3)", cfg.StorageBackend)
+		return nil, fmt.Errorf("unsupported storage backend %q (supported: local / s3)", cfg.StorageBackend)
 	}
 }
 

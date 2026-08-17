@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strconv"
 	"strings"
 	"time"
@@ -17,15 +18,16 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"xinjing/internal/logging"
-	"xinjing/internal/persistence/migrate/migrations"
 )
 
 // lockTTL 是迁移锁的「租约」时长：持有者超过该时长未释放，视为崩溃，允许接管。
 const lockTTL = 10 * time.Minute
 
-// Run 应用所有待执行的迁移（幂等：无新迁移时直接返回）。
-// driver 取值：sqlite / postgres。
-func Run(ctx context.Context, db *sql.DB, driver string) error {
+// Run 应用 fsys 中的所有待执行迁移（幂等：无新迁移时直接返回）。
+// driver 取值：sqlite / postgres / ydb。
+// fsys 是调用方传入的迁移集合（auth 服务传 authmigrations.FS，网关传 gatewaymigrations.FS），
+// 从而让不同服务各自维护独立的数据库 schema。
+func Run(ctx context.Context, db *sql.DB, driver string, fsys fs.FS) error {
 	dialect, err := dialectFor(driver)
 	if err != nil {
 		return err
@@ -46,7 +48,7 @@ func Run(ctx context.Context, db *sql.DB, driver string) error {
 	// goose 的日志接入统一日志模块
 	goose.SetLogger(logging.PrintfLogger{Logger: logging.For("goose")})
 
-	provider, err := goose.NewProvider(dialect, db, migrations.FS)
+	provider, err := goose.NewProvider(dialect, db, fsys)
 	if err != nil {
 		return fmt.Errorf("create goose provider: %w", err)
 	}
@@ -160,6 +162,6 @@ func dialectFor(driver string) (goose.Dialect, error) {
 	case "ydb", "yugabyte", "yugabytedb":
 		return goose.DialectYdB, nil
 	default:
-		return goose.DialectCustom, fmt.Errorf("unsupported database driver %q (支持: sqlite / postgres / ydb)", driver)
+		return goose.DialectCustom, fmt.Errorf("unsupported database driver %q (supported: sqlite / postgres / ydb)", driver)
 	}
 }

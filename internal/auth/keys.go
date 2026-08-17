@@ -6,6 +6,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"os"
 )
 
 // RSA 密钥解析失败时返回的错误。
@@ -85,4 +87,35 @@ func ParseRSAPublicKeyPEM(data []byte) (*rsa.PublicKey, error) {
 		return key, nil
 	}
 	return nil, ErrInvalidPublicKey
+}
+
+// LoadJWTManager 从 PEM 文件路径加载 RSA 密钥并构建 JWTManager。
+// 空路径表示缺少对应密钥（对应能力在 Issue/Verify 时返回 ErrMissingKey）。
+// 由调用方决定私钥/公钥是否必须：认证服务必须配私钥（签发），网关必须配公钥（验签）。
+func LoadJWTManager(privateKeyPath, publicKeyPath string) (*JWTManager, error) {
+	var priv *rsa.PrivateKey
+	var pub *rsa.PublicKey
+	var err error
+
+	if privateKeyPath != "" {
+		data, readErr := os.ReadFile(privateKeyPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read private key %s: %w", privateKeyPath, readErr)
+		}
+		if priv, err = ParseRSAPrivateKeyPEM(data); err != nil {
+			return nil, fmt.Errorf("parse private key %s: %w", privateKeyPath, err)
+		}
+	}
+
+	if publicKeyPath != "" {
+		data, readErr := os.ReadFile(publicKeyPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read public key %s: %w", publicKeyPath, readErr)
+		}
+		if pub, err = ParseRSAPublicKeyPEM(data); err != nil {
+			return nil, fmt.Errorf("parse public key %s: %w", publicKeyPath, err)
+		}
+	}
+
+	return NewJWTManager(priv, pub), nil
 }

@@ -11,21 +11,21 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"xinjing/internal/config"
 	"xinjing/internal/logging"
 )
 
-// Open 根据配置打开数据库并配置连接池。
+// Open 打开指定驱动与连接串的数据库，并配置连接池。
 // 返回的 gorm.DB 供后续仓储层使用。
-func Open(cfg *config.Config) (*gorm.DB, error) {
+// driver 取值：sqlite / postgres / ydb（后两者走 PG 协议）。
+func Open(driver, dsn string, maxOpen, maxIdle int) (*gorm.DB, error) {
 	var dialector gorm.Dialector
-	switch cfg.DBDriver {
+	switch driver {
 	case "postgres", "postgresql", "pg", "ydb", "yugabyte", "yugabytedb":
-		dialector = postgres.Open(cfg.DBDSN)
+		dialector = postgres.Open(dsn)
 	case "sqlite", "sqlite3", "":
-		dialector = sqlite.Open(cfg.DBDSN)
+		dialector = sqlite.Open(dsn)
 	default:
-		return nil, fmt.Errorf("unsupported database driver %q (支持: sqlite / postgres / ydb)", cfg.DBDriver)
+		return nil, fmt.Errorf("unsupported database driver %q (supported: sqlite / postgres / ydb)", driver)
 	}
 
 	// 把 GORM 内部的 SQL 日志接入统一日志模块：只记录慢查询与错误，避免刷屏
@@ -45,8 +45,8 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get underlying sql.DB: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(cfg.DBMaxOpen)
-	sqlDB.SetMaxIdleConns(cfg.DBMaxIdle)
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	return db, nil

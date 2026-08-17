@@ -7,41 +7,27 @@ import (
 	"testing"
 
 	_ "github.com/glebarez/sqlite" // 注册纯 Go 的 "sqlite" 驱动（database/sql）
+
+	"xinjing/internal/persistence/migrate/authmigrations"
+	"xinjing/internal/persistence/migrate/gatewaymigrations"
 )
 
-func TestRunSQLite(t *testing.T) {
-	// 用临时目录里的真实文件库（纯内存库在多连接下会各自独立，不适合验证完整流程）
+// openSQLite 打开一个临时文件 SQLite 库。
+func openSQLite(t *testing.T) *sql.DB {
+	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
 
-	// 第一次运行：应创建 users 表
-	if err := Run(context.Background(), db, "sqlite"); err != nil {
-		t.Fatalf("first Run: %v", err)
-	}
-
-	// users 表应已存在
-	var name string
-	if err := db.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&name); err != nil {
-		t.Fatalf("users table not found: %v", err)
-	}
-
-	// goose 版本表应有 7 条实际迁移记录（version_id=0 是 goose 自动写入的基准哨兵行）
-	// 对应 00001~00007 共 7 个迁移文件。
-	var versions int
-	if err := db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`).Scan(&versions); err != nil {
-		t.Fatalf("query goose_db_version: %v", err)
-	}
-	if versions != 7 {
-		t.Fatalf("goose_db_version count = %d, want 7", versions)
-	}
-
-	// 关键表都应已创建
-	for _, table := range []string{"users", "functions", "function_versions", "routes", "rate_limit_policies", "plugins", "plugin_instances", "invocation_logs", "refresh_tokens"} {
+// assertTablesExist 断言给定表都已创建。
+func assertTablesExist(t *testing.T, db *sql.DB, tables ...string) {
+	t.Helper()
+	for _, table := range tables {
 		var n int
 		if err := db.QueryRow(
 			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
@@ -51,40 +37,82 @@ func TestRunSQLite(t *testing.T) {
 			t.Fatalf("table %s not created", table)
 		}
 	}
+}
 
-	// users 表应包含迁移 00007 新增的 password_hash 列
-	var colCount int
-	if err := db.QueryRow(
-		`SELECT count(*) FROM pragma_table_info('users') WHERE name = 'password_hash'`).Scan(&colCount); err != nil {
-		t.Fatalf("query password_hash column: %v", err)
-	}
-	if colCount != 1 {
-		t.Fatalf("users.password_hash column not found")
-	}
-
-	// 迁移锁应已释放
+// assertLockReleased 断言迁移锁已释放。
+func assertLockReleased(t *testing.T, db *sql.DB) {
+	t.Helper()
 	var locks int
 	if err := db.QueryRow(`SELECT count(*) FROM schema_lock`).Scan(&locks); err != nil {
 		t.Fatalf("query schema_lock: %v", err)
 	}
 	if locks != 0 {
-		t.Fatalf("schema_lock rows = %d, want 0 (锁未释放)", locks)
+		t.Fatalf("schema_lock rows = %d, want 0 (lock not released)", locks)
+	}
+}
+
+func TestRunAuthMigrations(t *testing.T) {
+	db := openSQLite(t)
+
+	if err := Run(context.Background(), db, "sqlite", authmigrations.FS); err != nil {
+		t.Fatalf("first Run(auth): %v", err)
 	}
 
-	// 第二次运行应幂等（不报错、不重复建表）
-	if err := Run(context.Background(), db, "sqlite"); err != nil {
-		t.Fatalf("second Run: %v", err)
+	assertTablesExist(t, db, "users", "refresh_tokens")
+
+	var colCount int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM pragma_table_info('users') WHERE name = 'password_hash'`).Scan(&colCount); err != nil {
+		t.Fatalf("query password_hash: %v", err)
 	}
+	if colCount != 1 {
+		t.Fatalf("users.password_hash column not found")
+	}
+
+	var versions int
+	if err := db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`).Scan(&versions); err != nil {
+		t.Fatalf("query goose_db_version: %v", err)
+	}
+	if versions != 2 {
+		t.Fatalf("auth goose_db_version count = %d, want 2", versions)
+	}
+
+	assertLockReleased(t, db)
+
+	if err := Run(context.Background(), db, "sqlite", authmigrations.FS); err != nil {
+		t.Fatalf("second Run(auth): %v", err)
+	}
+}
+
+func TestRunGatewayMigrations(t *testing.T) {
+	db := openSQLite(t)
+
+	if err := Run(context.Background(), db, "sqlite", gatewaymigrations.FS); err != nil {
+		t.Fatalf("first Run(gateway): %v", err)
+	}
+
+	assertTablesExist(t, db,
+		"functions", "function_versions", "routes", "rate_limit_policies",
+		"plugins", "plugin_instances", "invocation_logs",
+	)
+
+	var versions int
+	if err := db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`).Scan(&versions); err != nil {
+		t.Fatalf("query goose_db_version: %v", err)
+	}
+	if versions != 4 {
+		t.Fatalf("gateway goose_db_version count = %d, want 4", versions)
+	}
+
+	assertLockReleased(t, db)
 }
 
 func TestRebind(t *testing.T) {
 	in := `INSERT INTO t (a, b, c) VALUES (1, ?, ?) ON CONFLICT DO NOTHING`
 
-	// SQLite：原样返回
 	if got := rebind(in, false); got != in {
 		t.Fatalf("rebind(sqlite) = %q, want unchanged %q", got, in)
 	}
-	// PostgreSQL：? 按出现顺序翻译为 $1、$2
 	want := `INSERT INTO t (a, b, c) VALUES (1, $1, $2) ON CONFLICT DO NOTHING`
 	if got := rebind(in, true); got != want {
 		t.Fatalf("rebind(pg) = %q, want %q", got, want)

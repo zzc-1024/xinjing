@@ -12,7 +12,7 @@ func New(cfg *config.Config) (Cache, error) {
 	case "memory", "":
 		return NewMemory(), nil
 	default:
-		return nil, fmt.Errorf("unsupported cache backend %q (支持: memory)", cfg.CacheBackend)
+		return nil, fmt.Errorf("unsupported cache backend %q (supported: memory)", cfg.CacheBackend)
 	}
 }
 
