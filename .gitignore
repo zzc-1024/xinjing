@@ -1,5 +1,14 @@
+# 忽略环境变量文件，避免隐私泄露
 .env
+
+# 忽略 Golang 构建输出
 .gocache/
+.gocache-vscode/
 .gopath/
+.gopath-vscode/
+vendor/
 bin/
+
+# 数据持久化
 *.db
+storage/
