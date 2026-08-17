@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -73,12 +74,16 @@ func TestMemoryConcurrent(t *testing.T) {
 	c := NewMemory()
 	ctx := context.Background()
 
+	// 每个 goroutine 用独立的 key，检验「Memory 在并发读写上的线程安全」。
+	// 注意：不能所有 goroutine 共享同一个 key 再各自 Delete —— 那会让别的
+	// goroutine 的 Delete 删掉此 goroutine 刚写入的值，导致 Get 读到 ErrMiss，
+	// 这属于测试对并发交互的错误假设，而非 Memory 实现的缺陷。
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			key := "k"
+			key := fmt.Sprintf("k-%d", n)
 			_ = c.Set(ctx, key, []byte("v"), time.Minute)
 			if _, err := c.Get(ctx, key); err != nil {
 				t.Errorf("concurrent Get: %v", err)
