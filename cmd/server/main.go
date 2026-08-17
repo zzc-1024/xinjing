@@ -13,6 +13,7 @@ import (
 
 	"xinjing/internal/auth"
 	"xinjing/internal/config"
+	"xinjing/internal/gateway"
 	"xinjing/internal/handler"
 	"xinjing/internal/logging"
 	"xinjing/internal/middleware"
@@ -20,6 +21,7 @@ import (
 	"xinjing/internal/persistence/cache"
 	"xinjing/internal/persistence/migrate"
 	"xinjing/internal/persistence/migrate/gatewaymigrations"
+	"xinjing/internal/persistence/repo"
 	"xinjing/internal/ratelimit"
 )
 
@@ -69,25 +71,24 @@ func main() {
 	// 5. 初始化限流器（开发期 memory 缓存，单机可用；valkey 留待引入后替换）
 	limiter := ratelimit.NewTokenBucket(cache.NewMemory())
 
-	// 6. 路由：/ping 保留公开（健康检查探活）；业务路由一律要求认证 + 限流。
+	// 6. 从数据库加载限流策略（按 name 查询）；未配置时回退内置默认策略。
+	rateLimitPolicyRepo := repo.NewRateLimitPolicyRepository(db)
+	mePolicy := lookupRateLimitPolicy(rateLimitPolicyRepo, "me-default")
+
+	// 7. 路由注册表：集中声明静态路由，统一装配认证/授权/限流。
+	// /ping 保留公开（健康检查探活），不走注册表；业务路由一律进注册表。
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
 
-	// 受保护路由示例：GET /me 需要「已认证 + 拥有 read 权限 + 不超限」。
-	// Chain 从后往前包裹：先 Authenticate（认证）→ 再 RequireScope（授权）→ 最后 RateLimit（限流）。
-	// 限流策略：per-key（按用户），每 60 秒最多 100 次，突发 10。
-	mux.Handle("GET /me", middleware.Chain(
-		http.HandlerFunc(handler.Me),
-		middleware.Authenticate(jwtAuthenticator),
-		middleware.RequireScope(auth.ScopeRead),
-		middleware.RateLimit(limiter, ratelimit.Policy{
-			Name:       "me-default",
-			LimitCount: 100,
-			WindowSec:  60,
-			Burst:      10,
-			Scope:      ratelimit.ScopePerKey,
-		}),
-	))
+	registry := gateway.NewRegistry(jwtAuthenticator, limiter)
+	registry.Add(gateway.Route{
+		Method:  "GET",
+		Pattern: "/me",
+		Handler: handler.Me,
+		Scope:   auth.ScopeRead,
+		Policy:  mePolicy,
+	})
+	registry.Mount(mux)
 
 	finalHandler := middleware.Chain(
 		mux,
@@ -125,4 +126,33 @@ func main() {
 		log.Error("shutdown error", "error", err)
 	}
 	log.Info("gateway server stopped")
+}
+
+// lookupRateLimitPolicy 从数据库按名称加载限流策略，转换为 ratelimit.Policy。
+// 库中无该策略（或 DB 未初始化策略数据）时，回退到内置默认策略，保证网关可启动。
+func lookupRateLimitPolicy(repo repo.RateLimitPolicyRepository, name string) *ratelimit.Policy {
+	p, err := repo.GetByName(context.Background(), name)
+	if err != nil {
+		// 查不到（开发初期策略表为空）或查询失败：回退默认策略
+		logging.For("gateway").Debug("rate limit policy not found, use default", "name", name, "error", err)
+		return defaultPolicy(name)
+	}
+	return &ratelimit.Policy{
+		Name:       p.Name,
+		LimitCount: p.LimitCount,
+		WindowSec:  p.WindowSec,
+		Burst:      p.Burst,
+		Scope:      ratelimit.Scope(p.Scope),
+	}
+}
+
+// defaultPolicy 返回内置默认限流策略（per-key，60 秒 100 次，突发 10）。
+func defaultPolicy(name string) *ratelimit.Policy {
+	return &ratelimit.Policy{
+		Name:       name,
+		LimitCount: 100,
+		WindowSec:  60,
+		Burst:      10,
+		Scope:      ratelimit.ScopePerKey,
+	}
 }
