@@ -30,6 +30,8 @@ type Config struct {
 	StorageS3AccessKey    string // S3 访问密钥
 	StorageS3SecretKey    string // S3 秘密密钥
 	StorageS3UsePathStyle bool   // 是否使用 path-style 寻址（RustFS 需要 true）
+
+	CacheBackend string // 缓存后端: memory(默认，单机)；valkey 留待阶段 2
 }
 
 // Load 从 .env 文件和环境变量中加载配置
@@ -59,6 +61,8 @@ func Load() *Config {
 		StorageS3AccessKey:    getEnv("XINJING_STORAGE_S3_ACCESS_KEY", ""),
 		StorageS3SecretKey:    getEnv("XINJING_STORAGE_S3_SECRET_KEY", ""),
 		StorageS3UsePathStyle: getEnvBool("XINJING_STORAGE_S3_USE_PATH_STYLE", true),
+
+		CacheBackend: getEnv("XINJING_CACHE_BACKEND", "memory"),
 	}
 
 	logging.For("config").Info("config loaded",
