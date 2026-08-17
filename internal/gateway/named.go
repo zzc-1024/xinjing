@@ -7,12 +7,14 @@ import (
 	"xinjing/internal/middleware"
 )
 
-// Provider 是提供者标识（官方为 "xinjing"，第三方用自己的组织名）。
-// 它与 Name 共同构成中间件/插件的唯一身份，用于命名空间隔离与冲突判定。
+// Provider 是提供者标识，与 Name 共同构成中间件/插件的唯一身份。
+//
+// 关键规则（从底层区分官方与第三方）：
+//   - 官方组件：Provider 为空串 ""。不显示任何提供者，只用裸名字（如 "auth"）。
+//   - 第三方组件：Provider 必为非空（用自己的组织名，如 "acme"）。
+//
+// 由于「空」是官方专用，第三方无法伪装成官方——这是比「官方叫 xinjing」更强的类型级区分。
 type Provider string
-
-// 官方内置提供者标识。
-const ProviderXinjing Provider = "xinjing"
 
 // validProviderChar 判断字符是否合法：英文大小写字母、数字、减号、下划线。
 // 不含点号（点保留给未来可能的层级扩展），也不含其他符号。
@@ -31,11 +33,9 @@ func validProviderChar(c rune) bool {
 	}
 }
 
-// Valid 校验 Provider 是否合法（非空，且每个字符都满足 validProviderChar）。
+// Valid 校验 Provider 是否合法。
+// 空串（官方专用）视为合法；非空时每个字符都须满足 validProviderChar。
 func (p Provider) Valid() bool {
-	if p == "" {
-		return false
-	}
 	for _, c := range p {
 		if !validProviderChar(c) {
 			return false
@@ -68,8 +68,13 @@ type NamedMiddleware struct {
 	OnConflict ConflictPolicy        // 重复冲突时的处理（默认 ConflictError）
 }
 
-// Key 返回唯一身份键，形如 "xinjing:auth"。
+// Key 返回唯一身份键。
+// 官方（Provider 为空）→ 裸名字（如 "auth"）；第三方 → "provider:name"（如 "acme:auth"）。
+// 二者天然不会冲突，从底层隔离官方与第三方命名空间。
 func (n NamedMiddleware) Key() string {
+	if n.Provider == "" {
+		return n.Name
+	}
 	return string(n.Provider) + ":" + n.Name
 }
 

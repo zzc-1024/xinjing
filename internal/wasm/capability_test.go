@@ -9,7 +9,7 @@ import (
 // 它演示「不共用部分」如何通过 Capability 接口接入共用内核。
 type logCapability struct{}
 
-func (logCapability) Key() string { return "xinjing:log" }
+func (logCapability) Key() string { return "log" } // 官方：空 Provider
 
 func (logCapability) Register(ctx context.Context, rt *Runtime) error {
 	// 用宿主模块构建器注入一个宿主函数（此处仅演示骨架，不真正导出函数）。
@@ -30,9 +30,15 @@ func TestRegistryAddAndDuplicate(t *testing.T) {
 }
 
 func TestCapabilityKeyString(t *testing.T) {
-	k := CapabilityKey{Provider: "xinjing", Name: "log"}
-	if k.String() != "xinjing:log" {
-		t.Fatalf("String() = %q, want xinjing:log", k.String())
+	// 官方：空 Provider → 裸名字
+	k := CapabilityKey{Provider: "", Name: "log"}
+	if k.String() != "log" {
+		t.Fatalf("String() = %q, want log", k.String())
+	}
+	// 第三方：非空 → provider:name
+	k2 := CapabilityKey{Provider: "acme", Name: "log"}
+	if k2.String() != "acme:log" {
+		t.Fatalf("String() = %q, want acme:log", k2.String())
 	}
 }
 

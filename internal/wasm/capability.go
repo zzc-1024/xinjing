@@ -12,10 +12,11 @@ import (
 //   - 云函数系统：函数按声明获得一组能力，多租户隔离也在此层实现（每个实例独立的能力集合）。
 //
 // 设计约定（与中间件/插件身份体系一致）：
-//   - 每种能力有 Provider + Name（如 xinjing:log），不同提供者可有同名能力；
+//   - 每种能力有 Provider + Name；官方 Provider 为空（裸名字，如 "log"），
+//     第三方为非空（如 "acme:log"），不同提供者可有同名能力；
 //   - 未来插件上传时声明 Capabilities（models.Plugin.Capabilities 字段已预留）。
 type Capability interface {
-	// Key 返回能力唯一身份，形如 "xinjing:log"。
+	// Key 返回能力唯一身份：官方为裸名字（如 "log"），第三方为 "provider:name"。
 	Key() string
 	// Register 把能力注册到运行时（通过 rt.NewHostModuleBuilder 注入宿主函数）。
 	// 在模块实例化之前调用；同一 Key 重复注册由注册表按冲突策略处理（后续实现）。
@@ -28,8 +29,11 @@ type CapabilityKey struct {
 	Name     string
 }
 
-// String 返回 "provider:name" 形式的唯一键。
+// String 返回唯一键：官方（Provider 为空）→ 裸名字；第三方 → "provider:name"。
 func (k CapabilityKey) String() string {
+	if k.Provider == "" {
+		return k.Name
+	}
 	return k.Provider + ":" + k.Name
 }
 

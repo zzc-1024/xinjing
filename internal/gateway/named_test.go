@@ -14,7 +14,7 @@ import (
 // 用于验证中间件是否被重复/正确执行。
 func countingMiddleware(counter *int, tag string) NamedMiddleware {
 	return NamedMiddleware{
-		Provider: ProviderXinjing,
+		Provider: "", // 官方：空 Provider
 		Name:     tag,
 		Apply: func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,13 +26,14 @@ func countingMiddleware(counter *int, tag string) NamedMiddleware {
 }
 
 func TestProviderValidation(t *testing.T) {
-	valid := []Provider{"xinjing", "acme-corp", "foo_bar", "a1", "ABC-123_x"}
+	// 官方：空串合法（专用形态）
+	valid := []Provider{"", "acme-corp", "foo_bar", "a1", "ABC-123_x"}
 	for _, p := range valid {
 		if !p.Valid() {
 			t.Errorf("Provider %q 应合法", p)
 		}
 	}
-	invalid := []Provider{"", "has.dot", "has space", "中文", "a/b"}
+	invalid := []Provider{"has.dot", "has space", "中文", "a/b"}
 	for _, p := range invalid {
 		if p.Valid() {
 			t.Errorf("Provider %q 应非法", p)
@@ -41,9 +42,15 @@ func TestProviderValidation(t *testing.T) {
 }
 
 func TestNamedMiddlewareKey(t *testing.T) {
-	m := NamedMiddleware{Provider: "xinjing", Name: "auth"}
-	if m.Key() != "xinjing:auth" {
-		t.Errorf("Key() = %q, want xinjing:auth", m.Key())
+	// 官方：空 Provider → 裸名字
+	m := NamedMiddleware{Provider: "", Name: "auth"}
+	if m.Key() != "auth" {
+		t.Errorf("Key() = %q, want auth", m.Key())
+	}
+	// 第三方：非空 Provider → provider:name
+	m2 := NamedMiddleware{Provider: "acme", Name: "auth"}
+	if m2.Key() != "acme:auth" {
+		t.Errorf("Key() = %q, want acme:auth", m2.Key())
 	}
 }
 
@@ -90,9 +97,9 @@ func TestDuplicateMiddlewareError(t *testing.T) {
 	counter := 0
 	reg := NewRegistry(authenticator, limiter)
 
-	// Sub 默认带一个 xinjing:count 中间件
+	// Sub 默认带一个官方 count 中间件（空 Provider）
 	sub := reg.Sub("/api", "", nil, countingMiddleware(&counter, "count"))
-	// 子路由又显式带同名的 xinjing:count → 重复
+	// 子路由又显式带同名的官方 count → 重复
 	sub.Add(Route{
 		Method:      "GET",
 		Pattern:     "/x",
@@ -116,7 +123,7 @@ func TestDuplicateMiddlewareKeepFirst(t *testing.T) {
 	secondCount := 0
 
 	// 两个同 Key 但有不同 Apply 的中间件，OnConflict=KeepFirst
-	m1 := NamedMiddleware{Provider: "xinjing", Name: "m", Apply: func(next http.Handler) http.Handler {
+	m1 := NamedMiddleware{Provider: "", Name: "m", Apply: func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { firstCount++; next.ServeHTTP(w, r) })
 	}, OnConflict: ConflictKeepFirst}
 

@@ -11,7 +11,7 @@ import (
 // maxLogLen 限制单次日志消息的最大长度（防 wasm 恶意传超大长度）。
 const maxLogLen = 4096
 
-// LogCapability 是 xinjing:log 能力：让 wasm 模块向宿主输出日志文本。
+// LogCapability 是官方 "log" 能力（Provider 为空，裸名字 "log"）：让 wasm 模块向宿主输出日志文本。
 //
 // 这是「最小 ABI」的完整示例：wasm 侧通过线性内存传递数据（指针+长度），
 // 宿主函数从沙箱内存读字节——验证了 wasm ↔ 宿主互调的完整链路。
@@ -21,8 +21,8 @@ type LogCapability struct {
 	Write func(msg string)
 }
 
-// Key 返回能力身份。
-func (l *LogCapability) Key() string { return "xinjing:log" }
+// Key 返回能力身份（官方：Provider 为空，裸名字 "log"）。
+func (l *LogCapability) Key() string { return "log" }
 
 // Register 注入宿主模块 "log"，导出函数 log_write(ptr, len)：
 // wasm 调用它把内存 [ptr, ptr+len) 的字节交给宿主。
