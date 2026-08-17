@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -13,9 +14,11 @@ import (
 	"xinjing/internal/response"
 )
 
-// TokenHandler 处理 OAuth2 风格的两类令牌请求：
-//   - POST /token   用密码登录，签发「短期 access + 长期 refresh」
-//   - POST /refresh 用 refresh token 兑换新的短期 access token（并旋转 refresh token）
+// TokenHandler 处理认证服务（cmd/auth）的令牌相关请求：
+//   - POST /register 注册新用户（邮箱 + 密码，密码加盐存哈希）
+//   - POST /token    用密码登录，签发「短期 access + 长期 refresh」
+//   - POST /refresh  用 refresh token 兑换新的短期 access token（并旋转 refresh token）
+//   - POST /revoke   吊销 refresh token
 //
 // 授权对象：本期仅支持用户本人（granted_to=self）；第三方授权留待后续阶段。
 type TokenHandler struct {
@@ -56,6 +59,20 @@ type tokenRequest struct {
 type refreshRequest struct {
 	GrantType    string `json:"grant_type"`
 	RefreshToken string `json:"refresh_token"`
+}
+
+// registerRequest 是 /register 的请求体。
+type registerRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// registerResponse 是注册成功的响应：返回用户信息（不含密码哈希）。
+type registerResponse struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // tokenResponse 是成功签发后返回的令牌对。
@@ -261,4 +278,78 @@ func (h *TokenHandler) parseScopes(scope string) []string {
 		return nil
 	}
 	return strings.Fields(scope)
+}
+
+// HandleRegister 处理 POST /register：注册新用户。
+// 校验：字段非空、邮箱格式、密码长度；邮箱唯一（已存在返回 409）；
+// 密码用 bcrypt 加盐哈希后入库，绝不明文存储。
+func (h *TokenHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Email = strings.TrimSpace(req.Email)
+
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		response.Error(w, http.StatusBadRequest, "name, email and password are required")
+		return
+	}
+	if !validEmail(req.Email) {
+		response.Error(w, http.StatusBadRequest, "invalid email format")
+		return
+	}
+	if len(req.Password) < 8 {
+		response.Error(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+	// bcrypt 算法的硬性上限：输入超过 72 字节会被静默截断，因此显式拒绝。
+	if len(req.Password) > 72 {
+		response.Error(w, http.StatusBadRequest, "password must be at most 72 bytes")
+		return
+	}
+
+	// 邮箱唯一性：已存在返回 409
+	if _, err := h.users.GetByEmail(r.Context(), req.Email); err == nil {
+		response.Error(w, http.StatusConflict, "email already registered")
+		return
+	} else if err != repo.ErrNotFound {
+		logging.FromContext(r.Context()).Error("check email exists failed", "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// 密码加盐哈希
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		logging.FromContext(r.Context()).Error("hash password failed", "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	user := &models.User{
+		Name:         req.Name,
+		Email:        req.Email,
+		PasswordHash: hash,
+	}
+	if err := h.users.Create(r.Context(), user); err != nil {
+		logging.FromContext(r.Context()).Error("create user failed", "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, registerResponse{
+		ID:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+	})
+}
+
+// validEmail 用标准库 net/mail 做邮箱格式的基础校验。
+// 它只校验「语法上像邮箱」，不校验域名是否真实存在（那是发送验证邮件的职责）。
+func validEmail(email string) bool {
+	a, err := mail.ParseAddress(email)
+	return err == nil && a.Address == email
 }

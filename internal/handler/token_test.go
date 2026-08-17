@@ -243,3 +243,91 @@ func TestRevokeMissingToken(t *testing.T) {
 		t.Errorf("缺 refresh_token 应 400, got %d", rec.Code)
 	}
 }
+
+// doRegister 发送一个 JSON POST 到 /register，返回 recorder。
+func doRegister(h *TokenHandler, payload any) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleRegister(rec, req)
+	return rec
+}
+
+func TestRegisterSuccess(t *testing.T) {
+	_, userRepo, refreshRepo := newTestEnv(t)
+	privKey := newTestRSA(t)
+	h := NewTokenHandler(userRepo, refreshRepo, auth.NewJWTManager(privKey, &privKey.PublicKey), 15*time.Minute, 30*24*time.Hour)
+
+	rec := doRegister(h, map[string]string{
+		"name":     "Alice",
+		"email":    "alice@example.com",
+		"password": "s3cret-password",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body registerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Email != "alice@example.com" {
+		t.Errorf("email = %q, want alice@example.com", body.Email)
+	}
+	if body.ID == "" {
+		t.Errorf("ID 不应为空")
+	}
+
+	// 注册后应能用该密码登录（验证密码加盐哈希正确入库）
+	loginRec := doToken(h, map[string]string{
+		"grant_type": "password",
+		"email":      "alice@example.com",
+		"password":   "s3cret-password",
+		"scope":      "read",
+	})
+	if loginRec.Code != http.StatusOK {
+		t.Errorf("注册后登录应成功, got %d", loginRec.Code)
+	}
+}
+
+func TestRegisterDuplicateEmail(t *testing.T) {
+	_, userRepo, refreshRepo := newTestEnv(t)
+	privKey := newTestRSA(t)
+	h := NewTokenHandler(userRepo, refreshRepo, auth.NewJWTManager(privKey, &privKey.PublicKey), 15*time.Minute, 30*24*time.Hour)
+
+	payload := map[string]string{
+		"name":     "Alice",
+		"email":    "dup@example.com",
+		"password": "s3cret-password",
+	}
+	if rec := doRegister(h, payload); rec.Code != http.StatusCreated {
+		t.Fatalf("首次注册应 201, got %d", rec.Code)
+	}
+	if rec := doRegister(h, payload); rec.Code != http.StatusConflict {
+		t.Errorf("重复邮箱应 409, got %d", rec.Code)
+	}
+}
+
+func TestRegisterValidation(t *testing.T) {
+	_, userRepo, refreshRepo := newTestEnv(t)
+	privKey := newTestRSA(t)
+	h := NewTokenHandler(userRepo, refreshRepo, auth.NewJWTManager(privKey, &privKey.PublicKey), 15*time.Minute, 30*24*time.Hour)
+
+	cases := []struct {
+		name    string
+		payload map[string]string
+		want    int
+	}{
+		{"缺字段", map[string]string{"email": "a@b.com", "password": "password1"}, http.StatusBadRequest},
+		{"密码过短", map[string]string{"name": "A", "email": "a@b.com", "password": "short"}, http.StatusBadRequest},
+		{"邮箱格式错", map[string]string{"name": "A", "email": "not-an-email", "password": "password1"}, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if rec := doRegister(h, c.payload); rec.Code != c.want {
+				t.Errorf("%s: status = %d, want %d", c.name, rec.Code, c.want)
+			}
+		})
+	}
+}

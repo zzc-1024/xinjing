@@ -85,6 +85,7 @@ func main() {
 	//    （这些端点本身就是「获取/兑换/撤销令牌」的入口）。
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
+	mux.HandleFunc("POST /register", tokenHandler.HandleRegister)
 	mux.HandleFunc("POST /token", tokenHandler.HandleToken)
 	mux.HandleFunc("POST /refresh", tokenHandler.HandleRefresh)
 	mux.HandleFunc("POST /revoke", tokenHandler.HandleRevoke)
