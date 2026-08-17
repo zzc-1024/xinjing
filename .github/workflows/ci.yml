@@ -39,6 +39,13 @@ jobs:
       - name: Vet
         run: make vet
 
-      # 6. 单元测试
+      # 6. 依赖许可证检查：拒绝 forbidden/unknown 许可证（AGPL/GPL/LGPL/MPL/SSPL/BSL 等都会被判 forbidden）。
+      #    只检查进入二进制的第三方依赖；--ignore xinjing 跳过本项目自己的包。
+      - name: Check licenses
+        run: |
+          go install github.com/google/go-licenses/v2@latest
+          go-licenses check --ignore xinjing ./cmd/server
+
+      # 7. 单元测试
       - name: Test
         run: make test
