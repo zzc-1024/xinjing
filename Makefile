@@ -14,7 +14,7 @@ endif
 .DEFAULT_GOAL := build
 
 # .PHONY 声明这些名字只是命令别名，不对应磁盘上的真实文件
-.PHONY: help build test vet fmt run clean
+.PHONY: help build test vet fmt run clean keygen
 
 help: ## 显示所有可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
@@ -37,3 +37,6 @@ run: build ## 编译并启动服务（Ctrl+C 触发优雅关停）
 
 clean: ## 清理构建产物
 	rm -rf bin
+
+keygen: ## 生成 RSA 密钥对到 keys/（等价于 go run ./cmd/keygen）
+	go run ./cmd/keygen -dir ./keys
