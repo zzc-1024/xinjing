@@ -28,10 +28,14 @@ Go FaaS 平台：用户上传函数、经网关调用执行，插件系统扩展
 - **认证中间件**：Authenticate（JWT 校验 + 注入 Principal）、RequireScope（权限校验 401/403）
 - **限流**：令牌桶（internal/ratelimit）+ RateLimit 中间件 + 策略落库（rate_limit_policies 表）
 - **路由注册表**：internal/gateway（Route + Sub 子路由 + Include 嵌套 + 命名中间件 Provider+Name 去重）
-  - 中间件身份体系：Provider（官方 xinjing）+ Name，冲突策略默认报错、可配 keep-first/keep-last
+  - 中间件身份体系：Provider + Name；官方 Provider 为空（裸名字，如 "auth"），第三方 Provider 非空（如 "acme:auth"）；冲突策略默认报错、可配 keep-first/keep-last
+
+### 阶段 3 · 插件系统 🔨（进行中，已启动地基）
+- **Wasm 内核（共用部分，已起步）**：wazero v1.12.0（Apache-2.0）已引入；`internal/wasm` 包 = Runtime（编译缓存 + 调用 + 内存限制 + 调用超时）+ 标准 WASI（wasi_snapshot_preview1）+ Capability 能力接口骨架
+- **最小 ABI 已验证**：首个官方能力 `log`（空 Provider），跑通「wasm 内存 ↔ 宿主」全链路
+- **待做**：ABI 能力逐项定稿（见 TODO.md）、插件挂载中间件链、热更新
 
 ### 待办阶段
-- **阶段 3 · 插件系统**：Wazero Wasm 沙箱 + ABI + 能力 + 热更新（能力清单见 TODO.md，待逐项定稿）
 - **阶段 4 · 插件平台**：上传 wasm/源码 → 构建 → 校验 → 注册表
 - **阶段 5 · 云函数管理**：函数 CRUD/版本/路由 + 多语言 SDK + 执行器
 - **管理面板 + E2E**：等核心 API 稳定后统一做
