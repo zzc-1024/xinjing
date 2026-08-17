@@ -19,8 +19,7 @@ endif
 .PHONY: help build test vet fmt run run-auth clean keygen
 
 help: ## 显示所有可用命令
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s
-", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
 
 build: ## 编译网关服务(cmd/server)与认证服务(cmd/auth)到 bin/
 	@mkdir -p bin
