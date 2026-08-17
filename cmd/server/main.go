@@ -88,7 +88,10 @@ func main() {
 		Scope:   auth.ScopeRead,
 		Policy:  mePolicy,
 	})
-	registry.Mount(mux)
+	if err := registry.Mount(mux); err != nil {
+		log.Error("mount routes failed", "error", err)
+		os.Exit(1)
+	}
 
 	finalHandler := middleware.Chain(
 		mux,
