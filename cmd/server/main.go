@@ -17,8 +17,10 @@ import (
 	"xinjing/internal/logging"
 	"xinjing/internal/middleware"
 	"xinjing/internal/persistence"
+	"xinjing/internal/persistence/cache"
 	"xinjing/internal/persistence/migrate"
 	"xinjing/internal/persistence/migrate/gatewaymigrations"
+	"xinjing/internal/ratelimit"
 )
 
 func main() {
@@ -64,16 +66,27 @@ func main() {
 	// 4. JWT 认证器：所有业务路由统一用它校验 Bearer JWT
 	jwtAuthenticator := &auth.JWTAuthenticator{Manager: jwtManager}
 
-	// 5. 路由：/ping 保留公开（健康检查探活）；业务路由一律要求认证。
+	// 5. 初始化限流器（开发期 memory 缓存，单机可用；valkey 留待引入后替换）
+	limiter := ratelimit.NewTokenBucket(cache.NewMemory())
+
+	// 6. 路由：/ping 保留公开（健康检查探活）；业务路由一律要求认证 + 限流。
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
 
-	// 受保护路由示例：GET /me 需要「已认证 + 拥有 read 权限」。
-	// Chain 从后往前包裹：先 Authenticate（认证）→ 再 RequireScope（授权）。
+	// 受保护路由示例：GET /me 需要「已认证 + 拥有 read 权限 + 不超限」。
+	// Chain 从后往前包裹：先 Authenticate（认证）→ 再 RequireScope（授权）→ 最后 RateLimit（限流）。
+	// 限流策略：per-key（按用户），每 60 秒最多 100 次，突发 10。
 	mux.Handle("GET /me", middleware.Chain(
 		http.HandlerFunc(handler.Me),
 		middleware.Authenticate(jwtAuthenticator),
 		middleware.RequireScope(auth.ScopeRead),
+		middleware.RateLimit(limiter, ratelimit.Policy{
+			Name:       "me-default",
+			LimitCount: 100,
+			WindowSec:  60,
+			Burst:      10,
+			Scope:      ratelimit.ScopePerKey,
+		}),
 	))
 
 	finalHandler := middleware.Chain(
