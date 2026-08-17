@@ -30,13 +30,26 @@ func TestRunSQLite(t *testing.T) {
 		t.Fatalf("users table not found: %v", err)
 	}
 
-	// goose 版本表应有 1 条实际迁移记录（version_id=0 是 goose 自动写入的基准哨兵行）
+	// goose 版本表应有 6 条实际迁移记录（version_id=0 是 goose 自动写入的基准哨兵行）
+	// 对应 00001~00006 共 6 个迁移文件。
 	var versions int
 	if err := db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id > 0`).Scan(&versions); err != nil {
 		t.Fatalf("query goose_db_version: %v", err)
 	}
-	if versions != 1 {
-		t.Fatalf("goose_db_version count = %d, want 1", versions)
+	if versions != 6 {
+		t.Fatalf("goose_db_version count = %d, want 6", versions)
+	}
+
+	// 关键表都应已创建
+	for _, table := range []string{"users", "api_keys", "functions", "function_versions", "routes", "rate_limit_policies", "plugins", "plugin_instances", "invocation_logs"} {
+		var n int
+		if err := db.QueryRow(
+			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
+			t.Fatalf("query table %s: %v", table, err)
+		}
+		if n != 1 {
+			t.Fatalf("table %s not created", table)
+		}
 	}
 
 	// 迁移锁应已释放
