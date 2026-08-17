@@ -181,3 +181,65 @@ func TestTokenMissingGrantType(t *testing.T) {
 		t.Errorf("缺 grant_type 应 400, got %d", rec.Code)
 	}
 }
+
+// doRevoke 发送一个 JSON POST 到 /revoke，返回 recorder。
+func doRevoke(h *TokenHandler, payload any) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleRevoke(rec, req)
+	return rec
+}
+
+func TestRevoke(t *testing.T) {
+	_, userRepo, refreshRepo := newTestEnv(t)
+	privKey := newTestRSA(t)
+	h := NewTokenHandler(userRepo, refreshRepo, auth.NewJWTManager(privKey, &privKey.PublicKey), 15*time.Minute, 30*24*time.Hour)
+
+	// 先登录拿到 refresh token
+	hash, _ := auth.HashPassword("s3cret")
+	u := &models.User{Name: "Carol", Email: "carol@example.com", PasswordHash: hash}
+	_ = userRepo.Create(context.Background(), u)
+
+	tokenRec := doToken(h, map[string]string{
+		"grant_type": "password",
+		"email":      "carol@example.com",
+		"password":   "s3cret",
+		"scope":      "read",
+	})
+	var tr tokenResponse
+	_ = json.Unmarshal(tokenRec.Body.Bytes(), &tr)
+
+	// 1) 吊销该 refresh token → 200
+	revokeRec := doRevoke(h, map[string]string{"refresh_token": tr.RefreshToken})
+	if revokeRec.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d, body = %s", revokeRec.Code, revokeRec.Body.String())
+	}
+
+	// 2) 吊销后该 refresh token 无法再兑换 → 401
+	refreshRec := doRefresh(h, map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": tr.RefreshToken,
+	})
+	if refreshRec.Code != http.StatusUnauthorized {
+		t.Errorf("吊销后 refresh 应 401, got %d", refreshRec.Code)
+	}
+
+	// 3) 重复吊销同一 token → 幂等，仍 200
+	revokeAgain := doRevoke(h, map[string]string{"refresh_token": tr.RefreshToken})
+	if revokeAgain.Code != http.StatusOK {
+		t.Errorf("重复吊销应幂等 200, got %d", revokeAgain.Code)
+	}
+}
+
+func TestRevokeMissingToken(t *testing.T) {
+	_, userRepo, refreshRepo := newTestEnv(t)
+	privKey := newTestRSA(t)
+	h := NewTokenHandler(userRepo, refreshRepo, auth.NewJWTManager(privKey, &privKey.PublicKey), 15*time.Minute, 30*24*time.Hour)
+
+	rec := doRevoke(h, map[string]string{})
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("缺 refresh_token 应 400, got %d", rec.Code)
+	}
+}

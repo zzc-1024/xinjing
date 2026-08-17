@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -75,11 +76,23 @@ func main() {
 
 	tokenHandler := handler.NewTokenHandler(userRepo, refreshRepo, jwtManager, accessTTL, refreshTTL)
 
+	// JWT 认证器（所有受保护路由统一用它校验 Bearer JWT）
+	jwtAuthenticator := &auth.JWTAuthenticator{Manager: jwtManager}
+
 	// 7. 路由注册
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ping", handler.HealthCheck(sqlDB))
 	mux.HandleFunc("POST /token", tokenHandler.HandleToken)
 	mux.HandleFunc("POST /refresh", tokenHandler.HandleRefresh)
+	mux.HandleFunc("POST /revoke", tokenHandler.HandleRevoke)
+
+	// 受保护路由示例：GET /me 需要「已认证 + 拥有 read 权限」。
+	// Chain 从后往前包裹：先执行 Authenticate（认证）→ 再 RequireScope（授权）。
+	mux.Handle("GET /me", middleware.Chain(
+		http.HandlerFunc(handler.Me),
+		middleware.Authenticate(jwtAuthenticator),
+		middleware.RequireScope(auth.ScopeRead),
+	))
 
 	// Trace 作为请求身份边界，需位于访问日志外层，为请求注入 trace_id；
 	// AccessLog 通过 logging.FromContext 读取，二者不再有代码级依赖。
@@ -127,29 +140,35 @@ func main() {
 }
 
 // newJWTManager 根据配置加载 RSA 密钥并构建 JWTManager。
-// 私钥/公钥文件路径为空时对应能力缺失（Issue 或 Verify 返回 ErrMissingKey）。
-// 签发节点配私钥，验证节点配公钥，二者可独立配置。
+//
+// 本服务是「签发节点」：/token 和 /refresh 都要签发 JWT，因此私钥必不可少。
+// 规则：
+//   - 未配置私钥路径 → 立即报错退出（fail fast），而不是留到运行期让接口返回 500。
+//   - 配置了路径但文件读不到或解析失败 → 报错退出。
+//   - 公钥可选：配置了必须能解析；未配置则 Verify 能力缺失（纯签发节点不需要）。
 func newJWTManager(cfg *config.Config) (*auth.JWTManager, error) {
-	var priv *rsa.PrivateKey
-	var pub *rsa.PublicKey
-
-	if cfg.JWTPrivateKeyPath != "" {
-		pemData, err := os.ReadFile(cfg.JWTPrivateKeyPath)
-		if err != nil {
-			return nil, err
-		}
-		if priv, err = auth.ParseRSAPrivateKeyPEM(pemData); err != nil {
-			return nil, err
-		}
+	// 私钥必须配置
+	if cfg.JWTPrivateKeyPath == "" {
+		return nil, fmt.Errorf("JWT 私钥未配置：请用 go run ./cmd/keygen 生成密钥对，并设置 XINJING_JWT_PRIVATE_KEY")
+	}
+	privPEM, err := os.ReadFile(cfg.JWTPrivateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 JWT 私钥文件 %s: %w", cfg.JWTPrivateKeyPath, err)
+	}
+	priv, err := auth.ParseRSAPrivateKeyPEM(privPEM)
+	if err != nil {
+		return nil, fmt.Errorf("解析 JWT 私钥文件 %s: %w", cfg.JWTPrivateKeyPath, err)
 	}
 
+	// 公钥可选，但若配置了必须能正确解析
+	var pub *rsa.PublicKey
 	if cfg.JWTPublicKeyPath != "" {
-		pemData, err := os.ReadFile(cfg.JWTPublicKeyPath)
+		pubPEM, err := os.ReadFile(cfg.JWTPublicKeyPath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("读取 JWT 公钥文件 %s: %w", cfg.JWTPublicKeyPath, err)
 		}
-		if pub, err = auth.ParseRSAPublicKeyPEM(pemData); err != nil {
-			return nil, err
+		if pub, err = auth.ParseRSAPublicKeyPEM(pubPEM); err != nil {
+			return nil, fmt.Errorf("解析 JWT 公钥文件 %s: %w", cfg.JWTPublicKeyPath, err)
 		}
 	}
 

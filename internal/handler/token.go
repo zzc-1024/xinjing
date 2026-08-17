@@ -158,7 +158,12 @@ func (h *TokenHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 签发新的短期 access token
-	access, _ := h.jwt.Issue(r.Context(), token.UserID, token.Scopes, h.accessTTL)
+	access, err := h.jwt.Issue(r.Context(), token.UserID, token.Scopes, h.accessTTL)
+	if err != nil {
+		logging.FromContext(r.Context()).Error("issue access token failed", "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	response.JSON(w, http.StatusOK, tokenResponse{
 		AccessToken:  access,
@@ -204,6 +209,49 @@ func (h *TokenHandler) issueTokens(w http.ResponseWriter, r *http.Request, userI
 		ExpiresIn:    int64(h.accessTTL.Seconds()),
 		RefreshToken: newPlain,
 	})
+}
+
+// revokeRequest 是 /revoke 的请求体。
+type revokeRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// HandleRevoke 处理 POST /revoke：吊销一个 refresh token。
+// 吊销后该 token 立即无法再兑换新的 access token；
+// 已发出的短期 access token 最多 15 分钟（accessTTL）内自然失效。
+func (h *TokenHandler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
+	var req revokeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RefreshToken == "" {
+		response.Error(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	// 查到对应记录（校验存在性即可；吊销本身对已吊销的 token 是幂等）
+	token, err := auth.ValidateRefreshToken(r.Context(), h.refreshRepo, req.RefreshToken)
+	if err != nil {
+		// 已吊销的 token 再次吊销，视为幂等成功；其他错误（不存在/过期）返回 400。
+		if err == auth.ErrRefreshTokenRevoked {
+			response.JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid refresh token")
+		return
+	}
+
+	// 置吊销标记并落库
+	now := h.now()
+	token.RevokedAt = &now
+	if err := h.refreshRepo.Update(r.Context(), token); err != nil {
+		logging.FromContext(r.Context()).Error("revoke refresh token failed", "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // parseScopes 解析请求中的 scope 字符串（空格分隔，如 "read write"）。
