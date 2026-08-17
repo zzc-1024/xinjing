@@ -1,5 +1,6 @@
 # 忽略环境变量文件，避免隐私泄露
 .env
+keys/
 
 # 忽略 Golang 构建输出
 .gocache/
